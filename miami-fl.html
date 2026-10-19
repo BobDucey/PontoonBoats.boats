@@ -747,6 +747,7 @@ html:not(.embedded) .send-label{display:inline;}
 <button class="icon-btn send" id="sendBtn" title="Send"><span class="send-icon">➤</span><span class="send-label">Submit</span></button>
 </div>
 <div class="phone-extra" id="phoneExtra" hidden><div class="phone-consent">By entering your number you agree a dealer may call or text you.</div><button type="button" class="use-email" id="useEmailBtn">Use email instead</button></div>
+<div class="phone-extra" id="changeEmailExtra" hidden><button type="button" class="use-email" id="changeEmailBtn">Wrong email? Change it</button></div>
 <div class="phone-extra" id="emailExtra" hidden><div class="phone-consent">We'll email your report, and a local dealer may contact you.</div></div>
 </div>
 </div>
@@ -1031,7 +1032,7 @@ try { chatInput.type = type; } catch (e) {}
 chatInput.setAttribute('inputmode', mode);
 chatInput.setAttribute('autocomplete', auto);
 chatInput.setAttribute('enterkeyhint', enter);
-try { document.getElementById('phoneExtra').hidden = key !== 'phone'; document.getElementById('emailExtra').hidden = key !== 'email'; } catch (e) {}
+try { document.getElementById('phoneExtra').hidden = key !== 'phone'; document.getElementById('emailExtra').hidden = key !== 'email'; document.getElementById('changeEmailExtra').hidden = !((key === 'name' || key === 'zip') && leadEmail); } catch (e) {}
 chatInput.setAttribute('name', key === 'phone' ? 'tel' : key === 'email' ? 'email' : key === 'zip' ? 'postal-code' : key === 'name' ? 'given-name' : 'message');
 chatInput.placeholder = hint;
 }
@@ -1178,7 +1179,7 @@ else if (q.key === 'zip') leadZip = value;
 else if (q.key === 'name') buyerFirstName = value;
 step++;
 // Skip email or zip if the buyer already gave it (for example through the sign-up box).
-while (QUESTIONS[step] && (((QUESTIONS[step].key === 'email' || QUESTIONS[step].key === 'phone') && (leadEmail || leadPhone)) || (QUESTIONS[step].key === 'zip' && leadZip))) step++;
+while (QUESTIONS[step] && (((QUESTIONS[step].key === 'email' || QUESTIONS[step].key === 'phone') && (leadEmail || leadPhone)) || (QUESTIONS[step].key === 'zip' && leadZip) || (QUESTIONS[step].key === 'name' && buyerFirstName))) step++;
 clearQuickReplies();
 const next = QUESTIONS[step];
 if (!next) { finishChat(); return; }
@@ -1306,6 +1307,15 @@ if (busy || chatDone || !QUESTIONS[step] || QUESTIONS[step].key !== 'phone') ret
 QUESTIONS[step] = EMAIL_Q;
 try { chatInput.value = ''; chatInput.blur(); setInputMode('email'); chatInput.focus(); } catch (e) {}
 askQuestion(EMAIL_Q);
+});
+document.getElementById('changeEmailBtn').addEventListener('click', function () {
+if (busy || chatDone) return;
+const i = QUESTIONS.findIndex(function (x) { return x.key === 'email'; });
+if (i < 0) return;
+step = i; leadEmail = null; delete answers.email;
+try { chatInput.value = ''; chatInput.blur(); setInputMode('email'); chatInput.focus(); } catch (e) {}
+say("No problem. What's the right email for your report?");
+showQuestionUI(QUESTIONS[i]);
 });
 sendBtn.addEventListener('click', () => trySend(chatInput.value));
 chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') trySend(chatInput.value); });
