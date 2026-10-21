@@ -977,7 +977,7 @@ const BOAT_TYPE_ONE = (/craft$/i.test(BOAT_TYPE) ? BOAT_TYPE : BOAT_TYPE.replace
 const METRO_NAME = String(SOURCE_METRO).split(',')[0].trim();
 const A_METRO = (/^[AEIOU]/i.test(METRO_NAME) ? "an " : "a ") + METRO_NAME;
 const OPENING_MESSAGE = "Good News! We found " + A_METRO + " " + BOAT_TYPE_ONE + " dealer. How should we send it to you?";
-const FIRST_QUESTION = "I'll build your free " + METRO_NAME + " " + BOAT_TYPE_ONE + " report. Are you looking for a new or used " + BOAT_TYPE_ONE.toLowerCase() + "?";
+const FIRST_QUESTION = "I'll send you a free " + METRO_NAME + " " + BOAT_TYPE_ONE + " report. Are you looking for a new or used " + BOAT_TYPE_ONE.toLowerCase() + "?";
 const QUESTIONS = [
 { key: 'newused', label: 'New or used', ask: FIRST_QUESTION, options: ['New', 'Used', 'Either'] },
 { key: 'email', ask: "What's your email, in case we lose connection? That's where your " + BOAT_TYPE_ONE + " report goes." },
