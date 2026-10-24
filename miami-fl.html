@@ -894,6 +894,7 @@ window.speechSynthesis.speak(u);
 const BACKEND_URL = 'https://pontoon-boats-boats.vercel.app';
 const CHAT_SESSION_ID = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2));
 const SOURCE_METRO = 'Miami, FL';
+const VERIFY_URL = 'https://imgjgrpmjoqlghbkmesy.supabase.co/functions/v1/email-verify';
 
 // Log a lightweight page-view (top-of-funnel), independent of whether chat is ever used.
 (function() {
@@ -1028,6 +1029,7 @@ if (key === 'email') { type = 'email'; mode = 'email'; auto = 'email'; hint = 'Y
 else if (key === 'phone') { type = 'tel'; mode = 'tel'; auto = 'tel'; hint = 'Mobile number'; enter = 'next'; }
 else if (key === 'zip') { mode = 'numeric'; auto = 'postal-code'; hint = 'Zip code'; enter = 'next'; }
 else if (key === 'name') { auto = 'given-name'; hint = 'First name'; enter = 'done'; }
+else if (key === 'code') { mode = 'numeric'; auto = 'one-time-code'; hint = '4-digit code'; enter = 'done'; }
 else if (!key) { hint = 'Type a message'; }
 try { chatInput.type = type; } catch (e) {}
 chatInput.setAttribute('inputmode', mode);
@@ -1185,7 +1187,7 @@ step++;
 while (QUESTIONS[step] && (answers[QUESTIONS[step].key] || ((QUESTIONS[step].key === 'email' || QUESTIONS[step].key === 'phone') && (leadEmail || leadPhone)) || (QUESTIONS[step].key === 'zip' && leadZip) || (QUESTIONS[step].key === 'name' && buyerFirstName))) step++;
 clearQuickReplies();
 const next = QUESTIONS[step];
-if (!next) { finishChat(); return; }
+if (!next) { startCodeStep(); return; }
 if (!next.options) {
 // Switch the keyboard (email, numbers, name) while we are still inside the buyer's tap.
 try { chatFoot.classList.remove('tap-only'); chatCard.classList.add('typed-step'); chatInput.blur(); setInputMode(next.key); chatInput.focus(); } catch (e) {}
@@ -1198,6 +1200,109 @@ typingEl.remove();
 busy = false;
 askQuestion(next);
 }, 350);
+}
+
+// ---- Email check and in-chat email confirmation code ----
+let codeStep = false;
+let codeTries = 0;
+let emailConfirmed = false;
+
+function postVerify(body) {
+return fetch(VERIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function (r) { return r.json(); });
+}
+
+// A quick look at the email before we accept it: typos, throwaway inboxes, domains that can't receive mail.
+async function checkEmail(email) {
+try {
+const r = await Promise.race([postVerify({ action: 'check', email: email }), new Promise(function (res) { setTimeout(function () { res({ ok: true }); }, 5000); })]);
+return r && typeof r.ok === 'boolean' ? r : { ok: true };
+} catch (e) { return { ok: true }; }
+}
+
+function offerEmailFix(q, chk, typed) {
+if (chk.reason === 'typo' && chk.suggestion) {
+say('Did you mean ' + chk.suggestion + '?');
+clearQuickReplies();
+const w = document.createElement('div'); w.className = 'quick-replies'; w.style.gridTemplateColumns = '1fr';
+[['Yes, use ' + chk.suggestion, chk.suggestion], ['No, ' + typed + ' is right', typed]].forEach(function (pair) {
+const b = document.createElement('button'); b.type = 'button'; b.className = 'quick-reply'; b.textContent = pair[0];
+b.addEventListener('click', function () { if (busy) return; addBubble('user', pair[1]); messages.push({ role: 'user', content: pair[1] }); acceptAnswer(q, pair[1]); });
+w.appendChild(b);
+});
+chatBody.appendChild(w); quickWrap = w;
+keepInView();
+return;
+}
+say(chk.reason === 'disposable' ? "That looks like a temporary inbox. What's an email you check regularly?" : "I can't find that email address. Could you double-check it and send it again?");
+keepInView();
+}
+
+async function startCodeStep() {
+if (!leadEmail || emailConfirmed) { finishChat(); return; }
+clearQuickReplies();
+busy = true;
+const t = addTyping();
+await queueLeadSave();
+let st = null;
+try { if (leadRecordId) st = (await postVerify({ action: 'send', lead_id: leadRecordId })).status; } catch (e) {}
+t.remove();
+busy = false;
+if (st === 'already') { emailConfirmed = true; finishChat(); return; }
+if (st !== 'sent') { finishChat(); return; }
+codeStep = true; codeTries = 0;
+say((buyerFirstName ? 'Thanks, ' + buyerFirstName + '! ' : 'Thanks! ') + 'Last step: I just emailed a 4-digit code to ' + leadEmail + '. Type it here to confirm your email.');
+showCodeUI();
+}
+
+function showCodeUI() {
+clearQuickReplies();
+try { chatFoot.classList.remove('tap-only'); chatCard.classList.add('typed-step'); } catch (e) {}
+setInputMode('code');
+const w = document.createElement('div'); w.className = 'quick-replies'; w.style.gridTemplateColumns = '1fr 1fr';
+[['Resend code', resendCode], ['Skip for now', skipCode]].forEach(function (pair) {
+const b = document.createElement('button'); b.type = 'button'; b.className = 'quick-reply'; b.textContent = pair[0];
+b.addEventListener('click', function () { if (!busy) pair[1](); });
+w.appendChild(b);
+});
+chatBody.appendChild(w); quickWrap = w;
+try { chatInput.focus(); } catch (e) {}
+keepInView();
+}
+
+async function resendCode() {
+busy = true;
+const t = addTyping();
+let st = null;
+try { st = (await postVerify({ action: 'send', lead_id: leadRecordId })).status; } catch (e) {}
+t.remove();
+busy = false;
+if (st === 'already') { codeStep = false; emailConfirmed = true; clearQuickReplies(); finishChat(); return; }
+say(st === 'sent' ? 'I sent a new code to ' + leadEmail + '. It can take a minute, so check your spam folder too.' : "I can't send another code right now. You can skip this step and confirm from the report email instead.");
+showCodeUI();
+}
+
+function skipCode() {
+codeStep = false;
+clearQuickReplies();
+finishChat();
+}
+
+async function checkCode(text) {
+const code = String(text).replace(/\D/g, '');
+if (code.length !== 4) { say('The code is 4 digits. Please type it again.'); showCodeUI(); return; }
+busy = true;
+const t = addTyping();
+let st = null;
+try { st = (await postVerify({ action: 'verify', lead_id: leadRecordId, code: code })).status; } catch (e) {}
+t.remove();
+busy = false;
+if (st === 'ok') { codeStep = false; emailConfirmed = true; logStep(); clearQuickReplies(); finishChat(); return; }
+codeTries++;
+if (st === 'wrong' && codeTries < 3) { say("That code doesn't match. Check the email from Capt. Bob and try again."); showCodeUI(); return; }
+say(st === 'expired' ? 'That code has expired.' : "That code still doesn't match.");
+codeStep = false;
+clearQuickReplies();
+finishChat();
 }
 
 function finishChat() {
@@ -1245,6 +1350,7 @@ const q = chatDone ? null : QUESTIONS[step];
 addBubble('user', text);
 messages.push({ role: 'user', content: text });
 userTurns++;
+if (codeStep) { await checkCode(text); return; }
 if (!q) { await talk(null); return; }
 
 let value = null;
@@ -1265,6 +1371,10 @@ if (!value && /\d/.test(text)) nudge = "I need a 5-digit zip code. Could you dou
 value = findFirstName(text);
 }
 
+if (value && q.key === 'email') {
+busy = true; const chkTyping = addTyping(); const chk = await checkEmail(value); chkTyping.remove(); busy = false;
+if (!chk.ok) { logStep(); offerEmailFix(q, chk, value); return; }
+}
 if (value) { logStep(); acceptAnswer(q, value); return; }
 if (nudge) { logStep(); say(nudge); keepInView(); return; }
 const answered = await talk(q);
@@ -1296,12 +1406,12 @@ const subline = realMatchFound
 ? `Good news — a dealer in ${areaText} carries the boat you're looking for and will be contacting you shortly at ${leadPhone || leadEmail || 'your email'}.`
 : `We're still signing up dealers in ${areaText}, so we'll ${leadPhone && !leadEmail ? 'text' : 'email'} you as soon as one who carries ${boatText} is ready to help.`;
 
-say((buyerFirstName ? 'Thanks, ' + buyerFirstName + '! ' : 'Thanks! ') + 'Your ' + BOAT_TYPE_ONE + ' report is on its way' + (leadEmail ? ' to ' + leadEmail : '') + '. Open the email from Capt. Bob and tap Review Report. If you don\'t see it in a few minutes, check your spam folder.');
+say(emailConfirmed ? (buyerFirstName ? 'Thanks, ' + buyerFirstName + '! ' : 'Thanks! ') + 'Your email is confirmed, and your ' + BOAT_TYPE_ONE + ' report is on its way to ' + leadEmail + '. If you don\'t see it in a few minutes, check your spam folder.' : (buyerFirstName ? 'Thanks, ' + buyerFirstName + '! ' : 'Thanks! ') + 'Your ' + BOAT_TYPE_ONE + ' report is on its way' + (leadEmail ? ' to ' + leadEmail : '') + '. Open the email from Capt. Bob and tap Review Report. If you don\'t see it in a few minutes, check your spam folder.');
 if (leadEmail) {
 const w = document.createElement('div'); w.className = 'quick-replies'; w.style.gridTemplateColumns = '1fr';
 const cb = document.createElement('button'); cb.className = 'quick-reply'; cb.textContent = 'Wrong email? Change it';
 cb.addEventListener('click', function () {
-w.remove(); chatDone = false; matchResultShown = false;
+w.remove(); chatDone = false; matchResultShown = false; emailConfirmed = false; codeStep = false;
 if (chatFoot) chatFoot.style.display = '';
 document.getElementById('changeEmailBtn').hidden = false;
 const i = QUESTIONS.findIndex(function (x) { return x.key === 'email'; });
@@ -1330,6 +1440,7 @@ document.getElementById('changeEmailBtn').addEventListener('click', function () 
 if (busy || chatDone) return;
 const i = QUESTIONS.findIndex(function (x) { return x.key === 'email'; });
 if (i < 0) return;
+emailConfirmed = false; codeStep = false;
 step = i; leadEmail = null; delete answers.email;
 try { chatInput.value = ''; chatInput.blur(); setInputMode('email'); chatInput.focus(); } catch (e) {}
 say("No problem. What's the right email for your report?");
