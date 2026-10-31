@@ -1199,6 +1199,7 @@ if (!next.options) {
 try { chatFoot.classList.remove('tap-only'); chatCard.classList.add('typed-step'); chatInput.blur(); setInputMode(next.key); chatInput.focus(); } catch (e) {}
 }
 queueLeadSave();
+if (q.key === 'email') { /* ZB-confirm */ saveQueue.then(function () { if (leadRecordId) return postVerify({ action: 'confirm', lead_id: leadRecordId }).then(function (r) { if (r && r.status === 'ok') emailConfirmed = true; }); }).catch(function () {}); }
 busy = true;
 const typingEl = addTyping();
 setTimeout(function () {
@@ -1220,7 +1221,7 @@ return fetch(VERIFY_URL, { method: 'POST', headers: { 'Content-Type': 'applicati
 // A quick look at the email before we accept it: typos, throwaway inboxes, domains that can't receive mail.
 async function checkEmail(email) {
 try {
-const r = await Promise.race([postVerify({ action: 'check', email: email }), new Promise(function (res) { setTimeout(function () { res({ ok: true }); }, 5000); })]);
+const r = await Promise.race([postVerify({ action: 'check', email: email }), new Promise(function (res) { setTimeout(function () { res({ ok: true }); }, 9000); })]);
 return r && typeof r.ok === 'boolean' ? r : { ok: true };
 } catch (e) { return { ok: true }; }
 }
@@ -1249,15 +1250,10 @@ clearQuickReplies();
 busy = true;
 const t = addTyping();
 await queueLeadSave();
-let st = null;
-try { if (leadRecordId) st = (await postVerify({ action: 'send', lead_id: leadRecordId })).status; } catch (e) {}
+try { if (leadRecordId) { const r = await postVerify({ action: 'confirm', lead_id: leadRecordId }); if (r && r.status === 'ok') emailConfirmed = true; } } catch (e) {}
 t.remove();
 busy = false;
-if (st === 'already') { emailConfirmed = true; finishChat(); return; }
-if (st !== 'sent') { finishChat(); return; }
-codeStep = true; codeTries = 0;
-say((buyerFirstName ? 'Thanks, ' + buyerFirstName + '! ' : 'Thanks! ') + 'Last step: I just emailed a 4-digit code to ' + leadEmail + '. Type it here to confirm your email.');
-showCodeUI();
+finishChat();
 }
 
 function showCodeUI() {
